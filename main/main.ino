@@ -16,13 +16,11 @@ GitHub : https://github.com/Syo-121/SmartRemoteController-with-ESP32-and-Homekit
 
 // GPIO定義
 const uint16_t kIrLedPin = 1;      // D0: 赤外線LED
-const int kControlPin = 2;         // D1: HomeSpan標準コントロールボタン（リセット用）
-const int kForceApButtonPin = 3;   // D2: APモード用ボタン
-const int kStatusLedPin = 4;      // Onboard LED: ステータス表示
+const int kForceApButtonPin = 2;   // D1: APモード起動用ボタン
+const int kControlPin = 3;         // D2: HomeSpan標準のコントロールボタン（ファクトリーリセット用）
+const int kStatusLedPin = 21;      // Onboard LED: ステータス表示
 
-// グローバルオブジェクト定義
 // パナソニックと三菱の新旧モデルに対応
-// 霧ヶ峰に確実に対応させたかった
 enum AcProtocol { PROTO_PANASONIC, PROTO_MITSUBISHI };
 
 struct AcModelDef {
@@ -31,11 +29,11 @@ struct AcModelDef {
   int modelType;
 };
 
-// モデル定義
+// モデル定義(よく使う順に上から）
 const AcModelDef AC_MODELS[] = {
+  { "Mitsubishi Modern (144)",  PROTO_MITSUBISHI, 0 }, // 10%
+  { "Mitsubishi Old (112)",     PROTO_MITSUBISHI, 0 }, // 20%
   { "Panasonic Standard (RKR)", PROTO_PANASONIC,  kPanasonicRkr },
-  { "Mitsubishi Modern (144)",  PROTO_MITSUBISHI, 0 },
-  { "Mitsubishi Old (112)",     PROTO_MITSUBISHI, 0 },
   { "Panasonic (JKE)",          PROTO_PANASONIC,  kPanasonicJke },
   { "Panasonic (LKE)",          PROTO_PANASONIC,  kPanasonicLke },
   { "Mitsubishi (136)",         PROTO_MITSUBISHI, 0 },
@@ -48,6 +46,7 @@ IRPanasonicAc acPanasonic(kIrLedPin);
 IRMitsubishiAC acMitsubishi(kIrLedPin); 
 
 // Homekit用クラス定義
+// モデル選択用疑似照明
 struct ModelSelector : Service::LightBulb {
   SpanCharacteristic *power;
   SpanCharacteristic *level;
@@ -65,6 +64,7 @@ struct ModelSelector : Service::LightBulb {
   boolean update() override { return true; }
 };
 
+// エアコン本体
 struct SmartAC : Service::HeaterCooler {
   SpanCharacteristic *active;
   SpanCharacteristic *currentTemp;
@@ -111,6 +111,7 @@ struct SmartAC : Service::HeaterCooler {
     return true;
   }
 
+  // 赤外線送信用の関数
   void sendIR(const AcModelDef* model, int power, int mode, float temp) {
     if (model->protocol == PROTO_PANASONIC) {
       acPanasonic.setModel(static_cast<panasonic_ac_remote_model_t>(model->modelType));
@@ -144,20 +145,20 @@ struct SmartAC : Service::HeaterCooler {
 void setup() {
   Serial.begin(115200);
 
-  // ステータスLEDの設定
+  // ステータスLEDの設定（今回はオンボードLEDにしました）
   homeSpan.setStatusPin(kStatusLedPin);
   
-  // D1ボタンの設定（長押しリセット用）
+  // ファクトリーLED
   homeSpan.setControlPin(kControlPin);
   
   // ペアリングコード
-  homeSpan.setPairingCode("00000000"); //自分で設定したペアリングコードを設定(8桁，ゾロ目等推測されやすいものはiOSに弾かれます)
+  homeSpan.setPairingCode("00000000"); // ペアリングコードの設定(8桁，ゾロ目等推測されやすいものはiOSに弾かれるらしいです)
   
   // APモードの設定
-  homeSpan.setApSSID("SmartRC-Setup");
+  homeSpan.setApSSID("SmartRC-Setup"); // APモード用SSID
 
   // APモード用ボタン
-  pinMode(kForceApButtonPin, INPUT_PULLUP);
+  pinMode(kForceApButtonPin, INPUT_PULLUP); 
 
   // IR初期化
   irSend.begin();
@@ -185,17 +186,17 @@ void setup() {
     new Characteristic::Name("Main AC");
     new SmartAC(selector); 
 
-  // APモード記号判定
+  // APモード判定
   if (digitalRead(kForceApButtonPin) == LOW) {
-    Serial.println("Force AP Button (D2) Pressed! Starting AP Mode...");
+    Serial.println("AP Mode Start!");
     
-    // ユーザーにフィードバック: LEDをゆっくり点灯させてAPモード移行を通知
+    // APモードへの移行を知らせる
     for(int i=0; i<3; i++) {
         digitalWrite(kStatusLedPin, LOW); delay(200);
         digitalWrite(kStatusLedPin, HIGH); delay(200);
     }
     
-    // 強制的にAPモードへ移行
+    // "A"を押したことにしてアクセスポイントモードへ
     homeSpan.processSerialCommand("A");
   }
 }
